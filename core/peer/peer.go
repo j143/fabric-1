@@ -39,6 +39,7 @@ import (
 	"github.com/hyperledger/fabric/core/ledger/statemgmt/state"
 	"github.com/hyperledger/fabric/core/util"
 	pb "github.com/hyperledger/fabric/protos"
+	"github.com/hyperledger/fabric/discovery"
 )
 
 // Peer provides interface for a peer
@@ -224,8 +225,14 @@ func NewPeerWithHandler(secHelperFunc func() crypto.Peer, handlerFact HandlerFac
 		return nil, fmt.Errorf("Error constructing NewPeerWithHandler: %s", err)
 	}
 	peer.ledgerWrapper = &ledgerWrapper{ledger: ledgerPtr}
-	go peer.chatWithPeer(viper.GetString("peer.discovery.rootnode"))
-	return peer, nil
+
+	if rootNode, err := discovery.GetRootNode(); err == nil {
+		go peer.chatWithPeer(rootNode)
+		return peer, nil
+	} else {
+		return nil, err
+	}
+
 }
 
 // NewPeerWithEngine returns a Peer which uses the supplied engine factory function for creating new peer engine and getting handler factory from it for creating new handlers on new Chat service invocations.
@@ -259,8 +266,20 @@ func NewPeerWithEngine(secHelperFunc func() crypto.Peer, engFactory EngineFactor
 		return nil, errors.New("Cannot supply nil handler factory")
 	}
 
-	go peer.chatWithPeer(viper.GetString("peer.discovery.rootnode"))
-	return peer, nil
+	ledgerPtr, err := ledger.GetLedger()
+	if err != nil {
+		return nil, fmt.Errorf("Error constructing NewPeerWithHandler: %s", err)
+	}
+
+	peer.ledgerWrapper = &ledgerWrapper{ledger: ledgerPtr}
+
+
+	if rootNode, err := discovery.GetRootNode(); err == nil {
+		go peer.chatWithPeer(rootNode)
+		return peer, nil
+	} else {
+		return nil, err
+	}
 }
 
 // Chat implementation of the the Chat bidi streaming RPC function
