@@ -23,12 +23,15 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
+	"time"
 	"path/filepath"
 	"bytes"
 	"net/http"
@@ -62,6 +65,7 @@ import (
 	"github.com/hyperledger/fabric/core/system_chaincode"
 	"github.com/hyperledger/fabric/events/producer"
 	pb "github.com/hyperledger/fabric/protos"
+
 )
 
 var logger = logging.MustGetLogger("main")
@@ -406,9 +410,6 @@ func serve(args []string) error {
 		viper.Set("validator.validity-period.verification", "false")
 	}
 
-	// Install discovery
-	discovery.SetDiscoveryService(core.NewStaticDiscovery(viper.GetBool("peer.validator.enabled")))
-
 	if err := peer.CacheConfiguration(); err != nil {
 		return err
 	}
@@ -439,8 +440,6 @@ func serve(args []string) error {
 		grpclog.Fatalf("Failed to create ehub server: %v", err)
 	}
 
-
-
 	logger.Info("Security enabled status: %t", core.SecurityEnabled())
 	logger.Info("Privacy enabled status: %t", viper.GetBool("security.privacy"))
 
@@ -468,6 +467,8 @@ func serve(args []string) error {
 
 	var peerServer *peer.PeerImpl
 
+	discInstance := core.NewStaticDiscovery(viper.GetString("peer.discovery.rootnode"))
+
 	//create the peerServer....
 	if peer.ValidatorEnabled() {
 		logger.Debug("Running as validating peer - making genesis block if needed")
@@ -476,10 +477,10 @@ func serve(args []string) error {
 			return makeGenesisError
 		}
 		logger.Debug("Running as validating peer - installing consensus %s", viper.GetString("peer.validator.consensus"))
-		peerServer, err = peer.NewPeerWithEngine(secHelperFunc, helper.GetEngine)
+		peerServer, err = peer.NewPeerWithEngine(secHelperFunc, helper.GetEngine, discInstance)
 	} else {
 		logger.Debug("Running as non-validating peer")
-		peerServer, err = peer.NewPeerWithHandler(secHelperFunc, peer.NewPeerHandler)
+		peerServer, err = peer.NewPeerWithHandler(secHelperFunc, peer.NewPeerHandler, discInstance)
 	}
 
 	if err != nil {
@@ -513,14 +514,11 @@ func serve(args []string) error {
 		go rest.StartOpenchainRESTServer(serverOpenchain, serverDevops)
 	}
 
-	rootNode, err := discovery.GetRootNode()
-	if err != nil {
-		grpclog.Fatalf("Failed to get discovery rootnode valey: %s", err)
-	}
+	rootNodes := discInstance.GetRootNodes()
 
-	logger.Info("Starting peer with id=%s, network id=%s, address=%s, discovery.rootnode=%s, validator=%v",
+	logger.Info("Starting peer with id=%s, network id=%s, address=%s, discovery.rootnode=[%v], validator=%v",
 		peerEndpoint.ID, viper.GetString("peer.networkId"),
-		peerEndpoint.Address, rootNode, peer.ValidatorEnabled())
+		peerEndpoint.Address, rootNodes, peer.ValidatorEnabled())
 
 	// Start the grpc server. Done in a goroutine so we can deploy the
 	// genesis block if needed.
